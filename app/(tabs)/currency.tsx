@@ -1,9 +1,10 @@
 /**
  * Currency Detection Screen
  * Detects and announces currency denomination
+ * Tap anywhere to scan - full screen camera
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -11,27 +12,31 @@ import {
   TouchableOpacity,
   useColorScheme,
   ActivityIndicator,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 
-import Colors, { FontSizes, Spacing, TouchTargets } from '@/constants/Colors';
+import Colors, { FontSizes, Spacing } from '@/constants/Colors';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
-import { detectCurrency } from '@/services/geminiVision';
+import { detectCurrency, CurrencyItem } from '@/services/geminiVision';
 
-// Read API key from environment variable (now using Groq for vision)
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
 
 export default function CurrencyScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'light' ? 'light' : 'dark'];
+  const router = useRouter();
   
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastResult, setLastResult] = useState<{
     detected?: boolean;
+    items?: CurrencyItem[];
+    total?: number;
     denomination?: number;
     currency?: string;
     description: string;
@@ -40,10 +45,92 @@ export default function CurrencyScreen() {
   const cameraRef = useRef<CameraView>(null);
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
+  
+  // Double tap to exit tracking
+  const lastTapRef = useRef(0);
+  const TAP_TIMEOUT = 400;
 
   useEffect(() => {
-    voice.announce('Currency detection screen. Hold a currency note in front of the camera and tap the scan button.');
+    voice.announce('Currency scanner. Tap anywhere to scan. Double tap to go back.');
   }, []);
+
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleScreenTap = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTapRef.current;
+    lastTapRef.current = now;
+
+    // Clear any pending single tap action
+    if (tapTimeoutRef.current) {
+      clearTimeout(tapTimeoutRef.current);
+      tapTimeoutRef.current = null;
+    }
+
+    // Double tap detection - go back
+    if (timeSinceLastTap < TAP_TIMEOUT) {
+      haptics.mediumImpact();
+      voice.quickFeedback('Going back');
+      router.back();
+      return;
+    }
+
+    // Delay single tap to allow for double tap detection
+    tapTimeoutRef.current = setTimeout(() => {
+      if (!isProcessing) {
+        handleScan();
+      }
+    }, TAP_TIMEOUT);
+  }, [isProcessing, router, haptics, voice]);
+
+  const handleScan = async () => {
+    if (!cameraRef.current || isProcessing) return;
+
+    haptics.mediumImpact();
+    setIsProcessing(true);
+    voice.quickFeedback('Scanning');
+
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: false,
+      });
+
+      if (photo?.uri) {
+        const result = await detectCurrency(photo.uri, GROQ_API_KEY);
+        
+        setLastResult(result);
+        
+        if (result.detected && (result.total || result.denomination)) {
+          const amount = result.total || result.denomination || 0;
+          haptics.currencyFeedback(amount);
+          
+          const currencyName = result.currency === 'INR' ? 'rupees' : 
+                               result.currency === 'USD' ? 'dollars' : 
+                               result.currency || '';
+          
+          // Announce total and list items
+          if (result.items && result.items.length > 1) {
+            const itemList = result.items
+              .map(i => i.denomination)
+              .join(' plus ');
+            voice.announce(`${amount} ${currencyName}. ${itemList}`);
+          } else {
+            voice.announce(`${amount} ${currencyName}`);
+          }
+        } else {
+          haptics.warning();
+          voice.announce(result.description || 'No currency detected. Tap to try again.');
+        }
+      }
+    } catch (err) {
+      haptics.error();
+      voice.announce('Could not scan. Tap to try again.');
+      console.error('Scan error:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   if (!permission) {
     return (
@@ -76,162 +163,74 @@ export default function CurrencyScreen() {
     );
   }
 
-  const handleScan = async () => {
-    if (!cameraRef.current || isProcessing) return;
-
-    haptics.mediumImpact();
-    setIsProcessing(true);
-    voice.quickFeedback('Scanning currency');
-
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: false,
-      });
-
-      if (photo?.uri) {
-        const result = await detectCurrency(photo.uri, GROQ_API_KEY);
-        
-        setLastResult(result);
-        
-        if (result.detected && result.denomination) {
-          // Provide haptic feedback for denomination
-          haptics.currencyFeedback(result.denomination);
-          
-          // Announce the currency
-          const currencyName = result.currency === 'INR' ? 'rupees' : 
-                               result.currency === 'USD' ? 'dollars' : 
-                               result.currency || 'units';
-          voice.announce(`This is a ${result.denomination} ${currencyName} note`);
-        } else {
-          haptics.warning();
-          voice.announce(result.description || 'No currency detected. Please try again.');
-        }
-      }
-    } catch (error) {
-      haptics.error();
-      voice.announce('Sorry, could not scan the currency. Please try again.');
-      console.error('Scan error:', error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const repeatAnnouncement = () => {
-    if (lastResult) {
-      haptics.lightImpact();
-      if (lastResult.denomination) {
-        haptics.currencyFeedback(lastResult.denomination);
-        const currencyName = lastResult.currency === 'INR' ? 'rupees' : 
-                             lastResult.currency === 'USD' ? 'dollars' : 
-                             lastResult.currency || 'units';
-        voice.announce(`This is a ${lastResult.denomination} ${currencyName} note`);
-      } else {
-        voice.announce(lastResult.description);
-      }
-    }
-  };
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Instructions */}
-      <View style={[styles.header, { backgroundColor: colors.surface }]}>
-        <Text style={[styles.headerText, { color: colors.text }]}>
-          Currency Detection
-        </Text>
-        <Text style={[styles.instructionText, { color: colors.textSecondary }]}>
-          Hold currency note flat and centered
-        </Text>
-      </View>
-
-      {/* Camera View */}
-      <View style={styles.cameraContainer}>
+      <Pressable 
+        style={styles.fullScreen} 
+        onPress={handleScreenTap}
+        disabled={isProcessing}
+      >
+        {/* Full screen camera */}
         <CameraView
           ref={cameraRef}
           style={styles.camera}
           facing="back"
-        >
-          {/* Scanning Guide Overlay */}
-          <View style={styles.guideOverlay}>
-            <View style={[styles.guideFrame, { borderColor: colors.primary }]} />
-          </View>
-          
-          {isProcessing && (
-            <View style={styles.processingOverlay}>
-              <ActivityIndicator size="large" color={colors.primary} />
+        />
+        
+        {/* Overlay */}
+        <View style={styles.overlay}>
+          {isProcessing ? (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator size="large" color={colors.secondary} />
               <Text style={[styles.processingText, { color: colors.text }]}>
-                Detecting...
+                Scanning...
+              </Text>
+            </View>
+          ) : lastResult ? (
+            // Show result
+            <View style={[styles.resultContainer, { 
+              backgroundColor: lastResult.detected ? colors.success + 'DD' : colors.surface + 'DD'
+            }]}>
+              <FontAwesome 
+                name={lastResult.detected ? 'check-circle' : 'question-circle'} 
+                size={50} 
+                color={lastResult.detected ? colors.background : colors.textMuted} 
+              />
+              <Text style={[styles.resultAmount, { 
+                color: lastResult.detected ? colors.background : colors.text 
+              }]}>
+                {lastResult.detected 
+                  ? `Total: ${lastResult.total || lastResult.denomination} ${lastResult.currency || ''}`
+                  : 'Not Detected'}
+              </Text>
+              {lastResult.items && lastResult.items.length > 1 && (
+                <Text style={[styles.resultItems, { color: colors.background }]}>
+                  {lastResult.items.map(i => `${i.denomination} ${i.type}`).join(' + ')}
+                </Text>
+              )}
+              <Text style={[styles.resultHint, { 
+                color: lastResult.detected ? colors.background : colors.textSecondary 
+              }]}>
+                Tap to scan again
+              </Text>
+            </View>
+          ) : (
+            // Initial state - instructions
+            <View style={styles.instructionContainer}>
+              <FontAwesome name="money" size={60} color={colors.secondary} />
+              <Text style={[styles.instructionText, { color: colors.text }]}>
+                Tap anywhere to scan
+              </Text>
+              <Text style={[styles.hintText, { color: colors.textMuted }]}>
+                Hold currency note in view
+              </Text>
+              <Text style={[styles.hintText, { color: colors.textMuted }]}>
+                Double tap to go back
               </Text>
             </View>
           )}
-        </CameraView>
-      </View>
-
-      {/* Result Display */}
-      {lastResult && (
-        <View style={[styles.resultContainer, { 
-          backgroundColor: lastResult.detected ? colors.success + '20' : colors.surface 
-        }]}>
-          <FontAwesome 
-            name={lastResult.detected ? 'check-circle' : 'question-circle'} 
-            size={40} 
-            color={lastResult.detected ? colors.success : colors.textMuted} 
-          />
-          <View style={styles.resultTextContainer}>
-            <Text style={[styles.resultAmount, { color: colors.text }]}>
-              {lastResult.detected 
-                ? `${lastResult.denomination} ${lastResult.currency || ''}`
-                : 'Not Detected'}
-            </Text>
-            <Text style={[styles.resultDescription, { color: colors.textSecondary }]}>
-              {lastResult.description}
-            </Text>
-          </View>
         </View>
-      )}
-
-      {/* Controls */}
-      <View style={[styles.controls, { backgroundColor: colors.surface }]}>
-        {/* Repeat Button */}
-        <TouchableOpacity
-          style={[styles.controlButton, { backgroundColor: colors.surfaceElevated }]}
-          onPress={repeatAnnouncement}
-          disabled={!lastResult}
-          accessibilityLabel="Repeat last result"
-          accessibilityRole="button"
-        >
-          <FontAwesome 
-            name="volume-up" 
-            size={28} 
-            color={lastResult ? colors.text : colors.textMuted} 
-          />
-        </TouchableOpacity>
-
-        {/* Scan Button */}
-        <TouchableOpacity
-          style={[styles.scanButton, { backgroundColor: colors.secondary }]}
-          onPress={handleScan}
-          disabled={isProcessing}
-          accessibilityLabel="Scan currency"
-          accessibilityHint="Double tap to scan the currency note"
-          accessibilityRole="button"
-        >
-          <FontAwesome name="money" size={40} color={colors.background} />
-          <Text style={[styles.scanButtonText, { color: colors.background }]}>
-            SCAN
-          </Text>
-        </TouchableOpacity>
-
-        {/* Help Button */}
-        <TouchableOpacity
-          style={[styles.controlButton, { backgroundColor: colors.surfaceElevated }]}
-          onPress={() => voice.announce('Hold your currency note flat in front of the camera, centered in the frame, then tap the scan button.')}
-          accessibilityLabel="Help"
-          accessibilityRole="button"
-        >
-          <FontAwesome name="question" size={28} color={colors.text} />
-        </TouchableOpacity>
-      </View>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -240,48 +239,63 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    padding: Spacing.md,
-    alignItems: 'center',
-  },
-  headerText: {
-    fontSize: FontSizes.xlarge,
-    fontWeight: 'bold',
-  },
-  instructionText: {
-    fontSize: FontSizes.medium,
-    marginTop: Spacing.xs,
-  },
-  cameraContainer: {
+  fullScreen: {
     flex: 1,
-    margin: Spacing.md,
-    borderRadius: Spacing.md,
-    overflow: 'hidden',
   },
   camera: {
     flex: 1,
   },
-  guideOverlay: {
+  overlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  guideFrame: {
-    width: '80%',
-    height: '60%',
-    borderWidth: 3,
-    borderRadius: Spacing.md,
-    borderStyle: 'dashed',
-  },
-  processingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+  processingContainer: {
+    alignItems: 'center',
+    padding: Spacing.xl,
     backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderRadius: Spacing.lg,
   },
   processingText: {
     fontSize: FontSizes.large,
     marginTop: Spacing.md,
+  },
+  instructionContainer: {
+    alignItems: 'center',
+    padding: Spacing.xl,
+  },
+  instructionText: {
+    fontSize: FontSizes.xlarge,
+    fontWeight: 'bold',
+    marginTop: Spacing.lg,
+    textAlign: 'center',
+  },
+  hintText: {
+    fontSize: FontSizes.medium,
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
+  resultContainer: {
+    alignItems: 'center',
+    padding: Spacing.xl,
+    borderRadius: Spacing.lg,
+    minWidth: 250,
+  },
+  resultAmount: {
+    fontSize: FontSizes.xxlarge,
+    fontWeight: 'bold',
+    marginTop: Spacing.md,
+    textAlign: 'center',
+  },
+  resultHint: {
+    fontSize: FontSizes.medium,
+    marginTop: Spacing.md,
+  },
+  resultItems: {
+    fontSize: FontSizes.medium,
+    marginTop: Spacing.sm,
+    textAlign: 'center',
   },
   permissionContainer: {
     flex: 1,
@@ -300,59 +314,6 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.md,
   },
   permissionButtonText: {
-    fontSize: FontSizes.large,
-    fontWeight: 'bold',
-  },
-  resultContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.lg,
-    marginHorizontal: Spacing.md,
-    marginBottom: Spacing.md,
-    borderRadius: Spacing.md,
-    gap: Spacing.md,
-  },
-  resultTextContainer: {
-    flex: 1,
-  },
-  resultAmount: {
-    fontSize: FontSizes.xlarge,
-    fontWeight: 'bold',
-  },
-  resultDescription: {
-    fontSize: FontSizes.medium,
-    marginTop: Spacing.xs,
-  },
-  controls: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.md,
-  },
-  controlButton: {
-    width: TouchTargets.medium,
-    height: TouchTargets.medium,
-    borderRadius: TouchTargets.medium / 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scanButton: {
-    width: TouchTargets.large + 20,
-    height: TouchTargets.large,
-    borderRadius: Spacing.lg,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  scanButtonText: {
     fontSize: FontSizes.large,
     fontWeight: 'bold',
   },

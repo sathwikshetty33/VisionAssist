@@ -17,7 +17,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "VisionAssist needs camera access to describe your surroundings and detect currency.",
-        "NSSpeechRecognitionUsageDescription": "VisionAssist uses speech recognition for voice commands.",
+        "NSSpeechRecognitionUsageDescription": "VisionAssist uses speech recognition for voice input.",
         "NSMicrophoneUsageDescription": "VisionAssist needs microphone access for voice commands.",
         "NSContactsUsageDescription": "VisionAssist can access your contacts to add emergency contacts.",
         "NSLocationWhenInUseUsageDescription": "VisionAssist needs your location to send it with emergency alerts."
@@ -36,10 +36,31 @@
         "READ_CONTACTS",
         "SEND_SMS",
         "CALL_PHONE",
-        "VIBRATE"
+        "VIBRATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_CONTACTS",
+        "SEND_SMS",
+        "CALL_PHONE",
+        "VIBRATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS"
       ],
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.VisionAssist"
     },
     "web": {
       "bundler": "metro",
@@ -64,6 +85,13 @@
         "expo-contacts",
         {
           "contactsPermission": "VisionAssist can access your contacts to add emergency contacts."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "VisionAssist needs microphone access for voice commands.",
+          "speechRecognitionPermission": "VisionAssist uses speech recognition for voice input."
         }
       ]
     ],

@@ -11,10 +11,18 @@ export interface VisionResponse {
   error?: string;
 }
 
+export interface CurrencyItem {
+  denomination: number;
+  currency: string;
+  type: 'note' | 'coin';
+}
+
 export interface CurrencyResponse {
   detected: boolean;
-  denomination?: number;
+  items?: CurrencyItem[];
+  total?: number;
   currency?: string;
+  denomination?: number; // For backward compatibility
   description: string;
   error?: string;
 }
@@ -68,7 +76,7 @@ export async function describeImage(
     const base64DataUrl = await imageToBase64DataUrl(imageUri);
     
     const prompt = additionalContext
-      ? `You are an assistant for a sight-impaired person. Describe this image in detail, focusing on: objects, people, text, colors, and spatial relationships. Be concise but thorough. The user asked: "${additionalContext}"`
+      ? `You already described this image. Now the user has a follow-up question. Answer ONLY the question directly and concisely, without re-describing the entire image. Question: "${additionalContext}"`
       : `You are an assistant for a sight-impaired person. Describe this image in detail, focusing on: 
         1. Main objects and their positions
         2. Any people and their actions
@@ -124,17 +132,17 @@ export async function detectCurrency(
     const client = getClient(apiKey);
     const base64DataUrl = await imageToBase64DataUrl(imageUri);
     
-    const prompt = `You are helping a sight-impaired person identify currency. 
-    Analyze this image and determine:
-    1. Is this a currency note or coin?
-    2. What denomination is it?
-    3. What currency (country) is it?
-    
-    Respond in this exact JSON format:
-    {"detected": true/false, "denomination": number, "currency": "INR/USD/EUR/etc", "description": "brief description"}
-    
-    If no currency is detected, respond with:
-    {"detected": false, "description": "No currency detected in the image"}`;
+    const prompt = `Identify all money (notes and coins) in this image.
+
+RESPOND ONLY WITH JSON, NO OTHER TEXT OR REASONING.
+
+JSON format:
+{"detected": true, "items": [{"denomination": 100, "type": "note"}, {"denomination": 5, "type": "coin"}], "total": 105, "currency": "INR"}
+
+If no money found:
+{"detected": false, "total": 0}
+
+IMPORTANT: Output ONLY the JSON object, nothing else.`;
 
     const completion = await client.chat.completions.create({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
@@ -168,7 +176,9 @@ export async function detectCurrency(
         const parsed = JSON.parse(jsonMatch[0]);
         return {
           detected: parsed.detected || false,
-          denomination: parsed.denomination,
+          items: parsed.items,
+          total: parsed.total,
+          denomination: parsed.total || parsed.denomination,
           currency: parsed.currency,
           description: parsed.description || 'Currency analysis complete',
         };

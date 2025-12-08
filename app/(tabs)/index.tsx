@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   ScrollView,
   useColorScheme,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,6 +20,7 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors, { FontSizes, Spacing, TouchTargets } from '@/constants/Colors';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant, VoiceAccents } from '@/hooks/useVoiceAssistant';
+import { useGestureNavigation } from '@/hooks/useGestureNavigation';
 
 interface QuickAction {
   id: string;
@@ -36,6 +38,7 @@ export default function HomeScreen() {
   
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
+  const gesture = useGestureNavigation();
   const [selectedAccent, setSelectedAccent] = useState('en-US');
 
   const quickActions: QuickAction[] = [
@@ -68,7 +71,7 @@ export default function HomeScreen() {
   useEffect(() => {
     // Welcome message on app load
     const timer = setTimeout(() => {
-      voice.announce('Welcome to Vision Assist. I\'m here to help you see the world. Say "help" anytime for assistance.');
+      voice.announce('Welcome to Vision Assist. Double tap for camera chat, triple tap for emergency, quadruple tap for currency.');
     }, 500);
     return () => clearTimeout(timer);
   }, []);
@@ -99,13 +102,14 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.header}>
+      <Pressable style={styles.gestureArea} onPress={gesture.handleTap}>
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={styles.header}>
           <Text 
             style={[styles.title, { color: colors.text }]}
             accessibilityRole="header"
@@ -201,19 +205,23 @@ export default function HomeScreen() {
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={[styles.footerText, { color: colors.textMuted }]}>
-            Tap any button twice to activate
+            2 taps: Chat • 3 taps: SOS • 4 taps: Currency
           </Text>
           <Text style={[styles.footerText, { color: colors.textMuted }]}>
             TalkBack/VoiceOver recommended
           </Text>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </Pressable>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  gestureArea: {
     flex: 1,
   },
   scrollView: {
