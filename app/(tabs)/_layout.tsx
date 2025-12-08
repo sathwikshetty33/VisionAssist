@@ -1,57 +1,82 @@
 import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
-import { Pressable } from 'react-native';
+import { Tabs } from 'expo-router';
+import { useColorScheme } from 'react-native';
 
 import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 
-// You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
+// Accessible tab bar icon with larger size
 function TabBarIcon(props: {
   name: React.ComponentProps<typeof FontAwesome>['name'];
   color: string;
 }) {
-  return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
+  return <FontAwesome size={32} style={{ marginBottom: -3 }} {...props} />;
 }
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme === 'light' ? 'light' : 'dark'];
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        // Disable the static render of the header on web
-        // to prevent a hydration error in React Navigation v6.
-        headerShown: useClientOnlyValue(false, true),
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.tabIconDefault,
+        tabBarStyle: {
+          backgroundColor: colors.tabBarBackground,
+          borderTopColor: colors.border,
+          height: 90,
+          paddingBottom: 25,
+          paddingTop: 10,
+        },
+        tabBarLabelStyle: {
+          fontSize: 14,
+          fontWeight: '600',
+        },
+        headerStyle: {
+          backgroundColor: colors.background,
+        },
+        headerTintColor: colors.text,
+        headerTitleStyle: {
+          fontSize: 24,
+          fontWeight: 'bold',
+        },
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Tab One',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-          headerRight: () => (
-            <Link href="/modal" asChild>
-              <Pressable>
-                {({ pressed }) => (
-                  <FontAwesome
-                    name="info-circle"
-                    size={25}
-                    color={Colors[colorScheme ?? 'light'].text}
-                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
-          ),
+          title: 'Assistant',
+          tabBarIcon: ({ color }) => <TabBarIcon name="microphone" color={color} />,
+          tabBarAccessibilityLabel: 'Voice Assistant. Double tap to open.',
         }}
       />
       <Tabs.Screen
-        name="two"
+        name="camera"
         options={{
-          title: 'Tab Two',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          title: 'Camera',
+          tabBarIcon: ({ color }) => <TabBarIcon name="camera" color={color} />,
+          tabBarAccessibilityLabel: 'Image Recognition Camera. Double tap to open.',
+        }}
+      />
+      <Tabs.Screen
+        name="currency"
+        options={{
+          title: 'Currency',
+          tabBarIcon: ({ color }) => <TabBarIcon name="money" color={color} />,
+          tabBarAccessibilityLabel: 'Currency Detection. Double tap to open.',
+        }}
+      />
+      <Tabs.Screen
+        name="sos"
+        options={{
+          title: 'SOS',
+          tabBarIcon: ({ color }) => <TabBarIcon name="exclamation-triangle" color={color} />,
+          tabBarAccessibilityLabel: 'Emergency SOS. Double tap to open.',
+          tabBarLabelStyle: {
+            fontSize: 16,
+            fontWeight: 'bold',
+            color: colors.emergency,
+          },
         }}
       />
     </Tabs>

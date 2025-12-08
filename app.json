@@ -6,21 +6,38 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "visionassist",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "VisionAssist needs camera access to describe your surroundings and detect currency.",
+        "NSSpeechRecognitionUsageDescription": "VisionAssist uses speech recognition for voice commands.",
+        "NSMicrophoneUsageDescription": "VisionAssist needs microphone access for voice commands.",
+        "NSContactsUsageDescription": "VisionAssist can access your contacts to add emergency contacts.",
+        "NSLocationWhenInUseUsageDescription": "VisionAssist needs your location to send it with emergency alerts."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_CONTACTS",
+        "SEND_SMS",
+        "CALL_PHONE",
+        "VIBRATE"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
@@ -30,7 +47,25 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "VisionAssist needs camera access to describe your surroundings and detect currency."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "VisionAssist needs your location to send it with emergency alerts."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "VisionAssist can access your contacts to add emergency contacts."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
