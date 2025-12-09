@@ -19,6 +19,7 @@ export const VoiceAccents = {
   'en-GB': { name: 'English (UK)', language: 'en-GB' },
   'en-IN': { name: 'English (India)', language: 'en-IN' },
   'hi-IN': { name: 'Hindi', language: 'hi-IN' },
+  'kn-IN': { name: 'Kannada', language: 'kn-IN' },
   'es-ES': { name: 'Spanish', language: 'es-ES' },
 };
 

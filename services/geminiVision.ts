@@ -1,10 +1,11 @@
 /**
  * Vision API Service using Groq
  * Handles image recognition using Llama 3.2 Vision model
- * Much more generous free tier than Gemini
+ * Supports multilingual responses (English, Hindi, Kannada)
  */
 
 import Groq from 'groq-sdk';
+import { Language, getAILanguageInstruction } from '@/services/translations';
 
 export interface VisionResponse {
   description: string;
@@ -69,21 +70,23 @@ async function imageToBase64DataUrl(imageUri: string): Promise<string> {
 export async function describeImage(
   imageUri: string,
   apiKey: string,
-  additionalContext?: string
+  additionalContext?: string,
+  language: Language = 'en'
 ): Promise<VisionResponse> {
   try {
     const client = getClient(apiKey);
     const base64DataUrl = await imageToBase64DataUrl(imageUri);
     
+    const langInstruction = getAILanguageInstruction(language);
+    
     const prompt = additionalContext
-      ? `You already described this image. Now the user has a follow-up question. Answer ONLY the question directly and concisely, without re-describing the entire image. Question: "${additionalContext}"`
-      : `You are an assistant for a sight-impaired person. Describe this image in detail, focusing on: 
-        1. Main objects and their positions
-        2. Any people and their actions
-        3. Any text visible
-        4. Colors and lighting
-        5. Potential hazards or important details
-        Keep the description clear and under 100 words.`;
+      ? `${langInstruction} You already described this image. Answer ONLY the question directly and concisely. Question: "${additionalContext}"`
+      : `${langInstruction} You are an assistant for a sight-impaired person. Describe this image, focusing on: 
+        1. Main objects and positions
+        2. People and actions
+        3. Visible text
+        4. Hazards or important details
+        Keep it clear and under 80 words.`;
 
     const completion = await client.chat.completions.create({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
@@ -211,9 +214,10 @@ IMPORTANT: Output ONLY the JSON object, nothing else.`;
 export async function chatAboutImage(
   imageUri: string,
   question: string,
-  apiKey: string
+  apiKey: string,
+  language: Language = 'en'
 ): Promise<VisionResponse> {
-  return describeImage(imageUri, apiKey, question);
+  return describeImage(imageUri, apiKey, question, language);
 }
 
 export default {

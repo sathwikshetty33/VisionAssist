@@ -23,6 +23,7 @@ import Colors, { FontSizes, Spacing } from '@/constants/Colors';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
 import { detectCurrency, CurrencyItem } from '@/services/geminiVision';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
 
@@ -45,13 +46,19 @@ export default function CurrencyScreen() {
   const cameraRef = useRef<CameraView>(null);
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
+  const { t, voiceCode } = useLanguage();
   
   // Double tap to exit tracking
   const lastTapRef = useRef(0);
   const TAP_TIMEOUT = 400;
 
+  // Sync voice language
   useEffect(() => {
-    voice.announce('Currency scanner. Tap anywhere to scan. Double tap to go back.');
+    voice.setCurrentLanguage(voiceCode);
+  }, [voiceCode]);
+
+  useEffect(() => {
+    voice.announce(t('currencyScanner'));
   }, []);
 
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,8 +76,13 @@ export default function CurrencyScreen() {
 
     // Double tap detection - go back
     if (timeSinceLastTap < TAP_TIMEOUT) {
+      // Clear any pending single tap
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
+        tapTimeoutRef.current = null;
+      }
       haptics.mediumImpact();
-      voice.quickFeedback('Going back');
+      voice.quickFeedback(t('goingBack'));
       router.back();
       return;
     }
@@ -88,7 +100,7 @@ export default function CurrencyScreen() {
 
     haptics.mediumImpact();
     setIsProcessing(true);
-    voice.quickFeedback('Scanning');
+    voice.quickFeedback(t('scanning'));
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
@@ -105,16 +117,16 @@ export default function CurrencyScreen() {
           const amount = result.total || result.denomination || 0;
           haptics.currencyFeedback(amount);
           
-          const currencyName = result.currency === 'INR' ? 'rupees' : 
-                               result.currency === 'USD' ? 'dollars' : 
+          const currencyName = result.currency === 'INR' ? t('rupees') : 
+                               result.currency === 'USD' ? t('dollars') : 
                                result.currency || '';
           
           // Announce total and list items
           if (result.items && result.items.length > 1) {
             const itemList = result.items
               .map(i => i.denomination)
-              .join(' plus ');
-            voice.announce(`${amount} ${currencyName}. ${itemList}`);
+              .join(' + ');
+            voice.announce(`${t('total')} ${amount} ${currencyName}. ${itemList}`);
           } else {
             voice.announce(`${amount} ${currencyName}`);
           }

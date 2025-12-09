@@ -25,6 +25,7 @@ import Colors, { FontSizes, Spacing } from '@/constants/Colors';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
 import { describeImage, chatAboutImage } from '@/services/geminiVision';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
 
@@ -51,8 +52,10 @@ export default function ChatScreen() {
   const cameraRef = useRef<CameraView>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingLockRef = useRef(false); // Prevent race conditions
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
+  const { language, whisperCode, voiceCode, t } = useLanguage();
   
   // Double tap to exit tracking
   const lastTapRef = useRef(0);
@@ -72,8 +75,13 @@ export default function ChatScreen() {
     })();
   }, []);
 
+  // Sync voice language with context
   useEffect(() => {
-    voice.announce('Chat mode. Tap to capture. Hold mic button to speak. Double tap to exit.');
+    voice.setCurrentLanguage(voiceCode);
+  }, [voiceCode]);
+
+  useEffect(() => {
+    voice.announce(t('chatMode'));
   }, []);
 
   // Auto-scroll to bottom when messages change
@@ -91,7 +99,7 @@ export default function ChatScreen() {
     // Double tap detection
     if (timeSinceLastTap < TAP_TIMEOUT) {
       haptics.mediumImpact();
-      voice.quickFeedback('Exiting chat');
+      voice.quickFeedback(t('exitingChat'));
       router.back();
       return;
     }
@@ -100,14 +108,14 @@ export default function ChatScreen() {
     if (!hasPhoto && !isProcessing) {
       captureAndDescribe();
     }
-  }, [hasPhoto, isProcessing, router, haptics, voice]);
+  }, [hasPhoto, isProcessing, router, haptics, voice, t]);
 
   const captureAndDescribe = async () => {
     if (!cameraRef.current || isProcessing) return;
 
     haptics.mediumImpact();
     setIsProcessing(true);
-    voice.quickFeedback('Capturing');
+    voice.quickFeedback(t('capturing'));
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
@@ -118,9 +126,9 @@ export default function ChatScreen() {
       if (photo?.uri) {
         setCurrentImage(photo.uri);
         setHasPhoto(true);
-        voice.announce('Analyzing image');
+        voice.announce(t('analyzing'));
         
-        const result = await describeImage(photo.uri, GROQ_API_KEY);
+        const result = await describeImage(photo.uri, GROQ_API_KEY, undefined, language);
         
         const assistantMessage: Message = {
           id: Date.now().toString(),
@@ -134,12 +142,12 @@ export default function ChatScreen() {
         
         // Prompt for questions after a delay
         setTimeout(() => {
-          voice.announce('Hold the mic button to ask a question.');
+          voice.announce(t('holdMicToAsk'));
         }, result.description.length * 40);
       }
     } catch (err) {
       haptics.error();
-      voice.announce('Sorry, could not capture or analyze the image');
+      voice.announce(t('captureError'));
       console.error('Capture error:', err);
     } finally {
       setIsProcessing(false);
@@ -147,8 +155,17 @@ export default function ChatScreen() {
   };
 
   const startRecording = async () => {
+    // Guard against multiple recording attempts using lock
+    if (recordingLockRef.current || isRecording || isProcessing) {
+      console.log('Recording already in progress or busy, ignoring');
+      return;
+    }
+    
+    recordingLockRef.current = true;
+    
     if (!audioPermission) {
-      voice.announce('Microphone permission required');
+      voice.announce(t('microphone'));
+      recordingLockRef.current = false;
       return;
     }
 
@@ -165,7 +182,7 @@ export default function ChatScreen() {
 
       haptics.mediumImpact();
       setIsRecording(true);
-      voice.quickFeedback('Listening');
+      voice.quickFeedback(t('listening'));
 
       // Ensure audio mode is set correctly
       await Audio.setAudioModeAsync({
@@ -180,33 +197,43 @@ export default function ChatScreen() {
     } catch (err) {
       console.error('Failed to start recording:', err);
       setIsRecording(false);
-      voice.announce('Could not start recording');
+      recordingLockRef.current = false;
+      voice.announce(t('recordingFailed'));
     }
   };
 
   const stopRecording = async () => {
-    if (!recordingRef.current) return;
+    if (!recordingRef.current) {
+      recordingLockRef.current = false;
+      return;
+    }
 
     try {
       setIsRecording(false);
+      recordingLockRef.current = false;
       haptics.lightImpact();
       
-      await recordingRef.current.stopAndUnloadAsync();
-      const uri = recordingRef.current.getURI();
-      recordingRef.current = null;
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+        const uri = recordingRef.current.getURI();
+        recordingRef.current = null;
 
-      if (uri) {
-        await transcribeAndAsk(uri);
+        if (uri) {
+          await transcribeAndAsk(uri);
+        }
+      } catch {
+        // Silently ignore errors from stopping recording too quickly
+        recordingRef.current = null;
       }
-    } catch (err) {
-      console.error('Failed to stop recording:', err);
-      voice.announce('Recording failed');
+    } catch {
+      // Silently ignore
+      recordingRef.current = null;
     }
   };
 
   const transcribeAndAsk = async (audioUri: string) => {
     setIsProcessing(true);
-    voice.quickFeedback('Processing');
+    voice.quickFeedback(t('processing'));
 
     try {
       // Create form data with audio file
@@ -217,7 +244,7 @@ export default function ChatScreen() {
         name: 'audio.m4a',
       } as any);
       formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'en');
+      formData.append('language', whisperCode);
 
       // Send to Groq Whisper API
       const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
@@ -261,10 +288,10 @@ export default function ChatScreen() {
 
     haptics.lightImpact();
     setIsProcessing(true);
-    voice.quickFeedback('Thinking');
+    voice.quickFeedback(t('thinking'));
 
     try {
-      const result = await chatAboutImage(currentImage, question, GROQ_API_KEY);
+      const result = await chatAboutImage(currentImage, question, GROQ_API_KEY, language);
       
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),

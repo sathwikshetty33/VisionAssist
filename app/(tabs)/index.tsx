@@ -19,8 +19,10 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import Colors, { FontSizes, Spacing, TouchTargets } from '@/constants/Colors';
 import { useHaptics } from '@/hooks/useHaptics';
-import { useVoiceAssistant, VoiceAccents } from '@/hooks/useVoiceAssistant';
+import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
 import { useGestureNavigation } from '@/hooks/useGestureNavigation';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { LANGUAGES, Language } from '@/services/translations';
 
 interface QuickAction {
   id: string;
@@ -39,7 +41,7 @@ export default function HomeScreen() {
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
   const gesture = useGestureNavigation();
-  const [selectedAccent, setSelectedAccent] = useState('en-US');
+  const { language, setLanguage, t, voiceCode, languageName } = useLanguage();
 
   const quickActions: QuickAction[] = [
     {
@@ -68,25 +70,30 @@ export default function HomeScreen() {
     },
   ];
 
+  // Sync voice language with context on mount and when it changes
   useEffect(() => {
-    // Welcome message on app load
+    voice.setCurrentLanguage(LANGUAGES[language].voiceCode);
+  }, [language]);
+
+  useEffect(() => {
+    // Welcome message on app load (delay to let language sync)
     const timer = setTimeout(() => {
-      voice.announce('Welcome to Vision Assist. Double tap for camera chat, triple tap for emergency, quadruple tap for currency.');
-    }, 500);
+      voice.announce(t('welcome') + '. ' + t('doubleTapChat') + ', ' + t('tripleTapSOS') + ', ' + t('quadTapCurrency'));
+    }, 800);
     return () => clearTimeout(timer);
-  }, []);
+  }, [language]);
 
   const handleQuickAction = (action: QuickAction) => {
     haptics.mediumImpact();
-    voice.quickFeedback(action.label);
+    voice.quickFeedback(t(action.id === 'camera' ? 'describeScene' : action.id === 'currency' ? 'scanCurrency' : 'emergencySOS'));
     router.push(action.route as any);
   };
 
-  const handleAccentChange = (accent: string) => {
+  const handleLanguageChange = (lang: Language) => {
     haptics.selection();
-    setSelectedAccent(accent);
-    voice.setCurrentLanguage(accent);
-    voice.quickFeedback(`Voice changed to ${VoiceAccents[accent as keyof typeof VoiceAccents]?.name || accent}`);
+    setLanguage(lang);
+    voice.setCurrentLanguage(LANGUAGES[lang].voiceCode);
+    voice.quickFeedback(LANGUAGES[lang].nativeName);
   };
 
   const speakHelp = () => {
@@ -155,33 +162,32 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* Voice Settings */}
+        {/* Language Settings */}
         <View style={styles.settingsContainer}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Voice Settings
+            Language / भाषा / ಭಾಷೆ
           </Text>
           
-          <View style={styles.accentGrid}>
-            {Object.entries(VoiceAccents).map(([key, value]) => (
+          <View style={styles.languageGrid}>
+            {(['en', 'hi', 'kn'] as Language[]).map((lang) => (
               <TouchableOpacity
-                key={key}
+                key={lang}
                 style={[
-                  styles.accentButton,
+                  styles.languageButton,
                   { 
-                    backgroundColor: selectedAccent === key ? colors.primary : colors.surface,
-                    borderColor: selectedAccent === key ? colors.primary : colors.border,
+                    backgroundColor: language === lang ? colors.primary : colors.surface,
+                    borderColor: language === lang ? colors.primary : colors.border,
                   }
                 ]}
-                onPress={() => handleAccentChange(key)}
-                accessibilityLabel={`${value.name} accent`}
-                accessibilityState={{ selected: selectedAccent === key }}
+                onPress={() => handleLanguageChange(lang)}
+                accessibilityLabel={`Select ${LANGUAGES[lang].name} language`}
                 accessibilityRole="button"
               >
                 <Text style={[
-                  styles.accentButtonText,
-                  { color: selectedAccent === key ? colors.background : colors.text }
+                  styles.languageButtonText,
+                  { color: language === lang ? colors.background : colors.text }
                 ]}>
-                  {value.name}
+                  {LANGUAGES[lang].nativeName}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -282,12 +288,12 @@ const styles = StyleSheet.create({
   settingsContainer: {
     marginBottom: Spacing.xl,
   },
-  accentGrid: {
+  languageGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.sm,
   },
-  accentButton: {
+  languageButton: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderRadius: Spacing.md,
@@ -295,8 +301,8 @@ const styles = StyleSheet.create({
     minHeight: TouchTargets.minimum,
     justifyContent: 'center',
   },
-  accentButtonText: {
-    fontSize: FontSizes.medium,
+  languageButtonText: {
+    fontSize: FontSizes.large,
     fontWeight: '600',
   },
   helpButton: {

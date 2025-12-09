@@ -19,12 +19,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
+import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import Colors, { FontSizes, Spacing, TouchTargets } from '@/constants/Colors';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
 import { useEmergencyContact } from '@/hooks/useEmergencyContact';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const COUNTDOWN_SECONDS = 5;
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
@@ -32,10 +34,12 @@ const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
 export default function SOSScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'light' ? 'light' : 'dark'];
+  const router = useRouter();
   
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
   const emergency = useEmergencyContact();
+  const { t, voiceCode, whisperCode } = useLanguage();
   
   const [isActivated, setIsActivated] = useState(false);
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
@@ -50,6 +54,11 @@ export default function SOSScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingLockRef = useRef(false); // Prevent race conditions
+  
+  // Double tap to exit
+  const lastTapRef = useRef(0);
+  const TAP_TIMEOUT = 400;
 
   // Request audio permission on mount
   useEffect(() => {
@@ -62,9 +71,14 @@ export default function SOSScreen() {
     })();
   }, []);
 
+  // Sync voice language
+  useEffect(() => {
+    voice.setCurrentLanguage(voiceCode);
+  }, [voiceCode]);
+
   // Announce screen on mount
   useEffect(() => {
-    voice.announce('SOS Emergency screen. Tap SOS for help. Hold anywhere to record voice message.');
+    voice.announce(t('sosScreen'));
   }, []);
 
   // Countdown timer
@@ -97,10 +111,10 @@ export default function SOSScreen() {
     const callMade = await emergency.callEmergencyContact();
     
     if (smsSent || callMade) {
-      voice.announce('Emergency alert sent. Help is on the way.');
+      voice.announce(t('emergencyAlert') + '. Help is on the way.');
       haptics.success();
     } else {
-      voice.announce('Could not send alert. Please add emergency contacts.');
+      voice.announce('Could not send. ' + t('addContact'));
       haptics.error();
     }
     
@@ -114,7 +128,7 @@ export default function SOSScreen() {
     
     haptics.heavyImpact();
     setIsActivated(true);
-    voice.emergencyAnnounce(`Emergency alert in ${COUNTDOWN_SECONDS} seconds. Tap cancel to stop.`);
+    voice.emergencyAnnounce(`${t('emergencyAlert')} ${COUNTDOWN_SECONDS} ${t('seconds')}`);
   }, [isActivated]);
 
   const handleCancel = useCallback(() => {
@@ -122,8 +136,22 @@ export default function SOSScreen() {
     setCountdown(COUNTDOWN_SECONDS);
     haptics.cancel();
     haptics.mediumImpact();
-    voice.quickFeedback('Cancelled');
+    voice.quickFeedback(t('cancelled'));
   }, []);
+
+  // Handle screen tap - double tap to go back
+  const handleScreenTap = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTapRef.current;
+    lastTapRef.current = now;
+
+    // Double tap detection - go back
+    if (timeSinceLastTap < TAP_TIMEOUT) {
+      haptics.mediumImpact();
+      voice.quickFeedback(t('goingBack'));
+      router.back();
+    }
+  }, [router, haptics, voice, t]);
 
   const handleAddContact = () => {
     if (!newContactPhone.trim()) {
@@ -136,7 +164,7 @@ export default function SOSScreen() {
       phoneNumber: newContactPhone.trim(),
     });
     
-    voice.quickFeedback('Contact added');
+    voice.quickFeedback(t('addContact'));
     haptics.success();
     setShowContactModal(false);
     setNewContactName('');
@@ -144,6 +172,14 @@ export default function SOSScreen() {
   };
 
   const startRecording = async () => {
+    // Guard against multiple recording attempts
+    if (recordingLockRef.current || isRecording || isTranscribing) {
+      console.log('Recording already in progress, ignoring');
+      return;
+    }
+    
+    recordingLockRef.current = true;
+    
     try {
       if (recordingRef.current) {
         try {
@@ -156,7 +192,7 @@ export default function SOSScreen() {
 
       haptics.mediumImpact();
       setIsRecording(true);
-      voice.quickFeedback('Recording');
+      voice.quickFeedback(t('recording'));
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -170,27 +206,38 @@ export default function SOSScreen() {
     } catch (err) {
       console.error('Failed to start recording:', err);
       setIsRecording(false);
-      voice.announce('Could not start recording');
+      recordingLockRef.current = false;
+      voice.announce(t('recordingFailed'));
     }
   };
 
   const stopRecording = async () => {
-    if (!recordingRef.current) return;
+    if (!recordingRef.current) {
+      recordingLockRef.current = false;
+      return;
+    }
 
     try {
       setIsRecording(false);
+      recordingLockRef.current = false;
       haptics.lightImpact();
       
-      await recordingRef.current.stopAndUnloadAsync();
-      const uri = recordingRef.current.getURI();
-      recordingRef.current = null;
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+        const uri = recordingRef.current.getURI();
+        recordingRef.current = null;
 
-      if (uri) {
-        await transcribeAndSend(uri);
+        if (uri) {
+          await transcribeAndSend(uri);
+        }
+      } catch (stopErr) {
+        // Silently ignore errors from stopping recording too quickly
+        // (happens when user taps instead of holds)
+        recordingRef.current = null;
       }
     } catch (err) {
-      console.error('Failed to stop recording:', err);
-      voice.announce('Recording failed');
+      // Silently ignore - don't announce errors to user
+      recordingRef.current = null;
     }
   };
 
@@ -259,6 +306,7 @@ export default function SOSScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <Pressable 
         style={styles.mainArea}
+        onPress={handleScreenTap}
         onPressIn={startRecording}
         onPressOut={stopRecording}
         disabled={isActivated || isTranscribing}
