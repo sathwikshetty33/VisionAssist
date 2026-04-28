@@ -93,7 +93,8 @@
           "microphonePermission": "VisionAssist needs microphone access for voice commands.",
           "speechRecognitionPermission": "VisionAssist uses speech recognition for voice input."
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

@@ -4,28 +4,28 @@
  * Uses Groq Whisper API for speech-to-text (works in Expo Go!)
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { Audio } from 'expo-av';
+import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  useColorScheme,
-  ActivityIndicator,
-  Pressable,
+    ActivityIndicator,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useColorScheme,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import { Audio } from 'expo-av';
-import { useRouter } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import Colors, { FontSizes, Spacing } from '@/constants/Colors';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
-import { describeImage, chatAboutImage } from '@/services/geminiVision';
-import { useLanguage } from '@/contexts/LanguageContext';
+import { chatAboutImage, describeImage } from '@/services/geminiVision';
 
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
 
@@ -53,13 +53,13 @@ export default function ChatScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingLockRef = useRef(false); // Prevent race conditions
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const haptics = useHaptics();
   const voice = useVoiceAssistant();
   const { language, whisperCode, voiceCode, t } = useLanguage();
   
-  // Double tap to exit tracking
-  const lastTapRef = useRef(0);
-  const TAP_TIMEOUT = 400;
+  const DOUBLE_TAP_TIMEOUT = 800;
 
   // Request audio permission on mount
   useEffect(() => {
@@ -91,24 +91,75 @@ export default function ChatScreen() {
     }
   }, [messages]);
 
-  const handleScreenTap = useCallback(() => {
-    const now = Date.now();
-    const timeSinceLastTap = now - lastTapRef.current;
-    lastTapRef.current = now;
+  const pressDownTimeRef = useRef(0);
+  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const TAP_HOLD_THRESHOLD = 200; // ms - if held longer, it's a hold gesture, not a tap
 
-    // Double tap detection
-    if (timeSinceLastTap < TAP_TIMEOUT) {
+  const handlePressIn = useCallback(() => {
+    pressDownTimeRef.current = Date.now();
+    
+    // In chat mode, set up a timer to start recording if held long enough
+    if (hasPhoto && !isProcessing) {
+      // Schedule recording start after TAP_HOLD_THRESHOLD
+      recordingTimeoutRef.current = setTimeout(() => {
+        startRecording();
+      }, TAP_HOLD_THRESHOLD);
+    }
+  }, [hasPhoto, isProcessing]);
+
+  const handlePressOut = useCallback(async () => {
+    const pressDuration = Date.now() - pressDownTimeRef.current;
+    
+    // Clear the recording timeout if it hasn't fired yet
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+    
+    // If it was a long press, stop recording
+    if (pressDuration >= TAP_HOLD_THRESHOLD && isRecording) {
+      await stopRecording();
+      return;
+    }
+    
+    // Quick press - treat as a tap for double-tap exit detection
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
+    }
+
+    tapCountRef.current += 1;
+
+    if (tapCountRef.current === 2) {
+      tapCountRef.current = 0;
       haptics.mediumImpact();
       voice.quickFeedback(t('exitingChat'));
       router.back();
       return;
     }
 
-    // Single tap - capture photo if not already done
-    if (!hasPhoto && !isProcessing) {
-      captureAndDescribe();
-    }
-  }, [hasPhoto, isProcessing, router, haptics, voice, t]);
+    tapTimerRef.current = setTimeout(() => {
+      if (tapCountRef.current === 1) {
+        if (!hasPhoto && !isProcessing) {
+          captureAndDescribe();
+        }
+      }
+      tapCountRef.current = 0;
+      tapTimerRef.current = null;
+    }, DOUBLE_TAP_TIMEOUT);
+  }, [hasPhoto, isProcessing, isRecording, router, haptics, voice, t]);
+
+  useEffect(() => {
+    return () => {
+      if (tapTimerRef.current) {
+        clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = null;
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const captureAndDescribe = async () => {
     if (!cameraRef.current || isProcessing) return;
@@ -322,7 +373,11 @@ export default function ChatScreen() {
   if (!permission.granted) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <Pressable style={styles.fullScreen} onPress={handleScreenTap}>
+        <Pressable 
+          style={styles.fullScreen} 
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+        >
           <View style={styles.permissionContainer}>
             <FontAwesome name="camera" size={80} color={colors.textMuted} />
             <Text style={[styles.permissionText, { color: colors.text }]}>
@@ -348,9 +403,8 @@ export default function ChatScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <Pressable 
         style={styles.fullScreen} 
-        onPress={handleScreenTap}
-        onPressIn={hasPhoto ? startRecording : undefined}
-        onPressOut={hasPhoto ? stopRecording : undefined}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
         disabled={isProcessing}
       >
         {!hasPhoto ? (
