@@ -10,17 +10,14 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 
 export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
+    // Catch any errors thrown by the Layout component.
+    ErrorBoundary
 } from 'expo-router';
 
 export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
   initialRouteName: '(tabs)',
 };
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -35,7 +32,16 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
-      SplashScreen.hideAsync();
+      // Try to hide splash screen, but don't fail if it's already hidden or not available
+      const hideSplash = async () => {
+        try {
+          await SplashScreen.hideAsync();
+        } catch (error) {
+          // Ignore splash screen errors - they often happen during development
+          console.log('Splash screen hide skipped:', error instanceof Error ? error.message : String(error));
+        }
+      };
+      hideSplash();
     }
   }, [loaded]);
 

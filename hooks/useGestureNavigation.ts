@@ -4,12 +4,12 @@
  * Double tap: Camera/Chat, Triple tap: SOS, Quadruple tap: Currency
  */
 
-import { useRef, useCallback } from 'react';
 import { useRouter } from 'expo-router';
+import { useCallback, useRef } from 'react';
 import { useHaptics } from './useHaptics';
 import { useVoiceAssistant } from './useVoiceAssistant';
 
-const TAP_TIMEOUT = 500; // ms to wait for additional taps
+const TAP_TIMEOUT = 1200; // ms to wait for additional taps
 const MIN_TAPS_FOR_ACTION = 2;
 const MAX_TAPS_FOR_ACTION = 4;
 
@@ -27,7 +27,7 @@ export function useGestureNavigation(config: GestureConfig = {}) {
   const voice = useVoiceAssistant();
   
   const tapCountRef = useRef(0);
-  const tapTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const tapTimerRef = useRef<number | null>(null);
   const lastTapTimeRef = useRef(0);
 
   const executeAction = useCallback((tapCount: number) => {

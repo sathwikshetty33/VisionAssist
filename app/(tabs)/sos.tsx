@@ -4,29 +4,29 @@
  * Voice-to-SMS: Record audio, transcribe with Whisper, send via SMS
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  Modal,
-  useColorScheme,
-  Linking,
-  ScrollView,
-  Pressable,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Audio } from 'expo-av';
 import { useRouter } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useColorScheme,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Colors, { FontSizes, Spacing, TouchTargets } from '@/constants/Colors';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useEmergencyContact } from '@/hooks/useEmergencyContact';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
-import { useEmergencyContact } from '@/hooks/useEmergencyContact';
-import { useLanguage } from '@/contexts/LanguageContext';
 
 const COUNTDOWN_SECONDS = 5;
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
@@ -44,6 +44,11 @@ export default function SOSScreen() {
   const [isActivated, setIsActivated] = useState(false);
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [isSending, setIsSending] = useState(false);
+  const [hasAudioPermission, setHasAudioPermission] = useState(false);
+  const [hasAutoStartedRecording, setHasAutoStartedRecording] = useState(false);
+  const [recordingCountdown, setRecordingCountdown] = useState<number | null>(null);
+  const autoStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingCountdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Contact modal
   const [showContactModal, setShowContactModal] = useState(false);
@@ -58,12 +63,13 @@ export default function SOSScreen() {
   
   // Double tap to exit
   const lastTapRef = useRef(0);
-  const TAP_TIMEOUT = 400;
+  const TAP_TIMEOUT = 1200;
 
   // Request audio permission on mount
   useEffect(() => {
     (async () => {
-      await Audio.requestPermissionsAsync();
+      const { status } = await Audio.requestPermissionsAsync();
+      setHasAudioPermission(status === 'granted');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -139,20 +145,6 @@ export default function SOSScreen() {
     voice.quickFeedback(t('cancelled'));
   }, []);
 
-  // Handle screen tap - double tap to go back
-  const handleScreenTap = useCallback(() => {
-    const now = Date.now();
-    const timeSinceLastTap = now - lastTapRef.current;
-    lastTapRef.current = now;
-
-    // Double tap detection - go back
-    if (timeSinceLastTap < TAP_TIMEOUT) {
-      haptics.mediumImpact();
-      voice.quickFeedback(t('goingBack'));
-      router.back();
-    }
-  }, [router, haptics, voice, t]);
-
   const handleAddContact = () => {
     if (!newContactPhone.trim()) {
       voice.announce('Please enter a phone number');
@@ -171,7 +163,7 @@ export default function SOSScreen() {
     setNewContactPhone('');
   };
 
-  const startRecording = async () => {
+  const startRecording = useCallback(async () => {
     // Guard against multiple recording attempts
     if (recordingLockRef.current || isRecording || isTranscribing) {
       console.log('Recording already in progress, ignoring');
@@ -209,7 +201,40 @@ export default function SOSScreen() {
       recordingLockRef.current = false;
       voice.announce(t('recordingFailed'));
     }
-  };
+  }, [isRecording, isTranscribing, t, voice, haptics]);
+
+  useEffect(() => {
+    if (!hasAudioPermission || hasAutoStartedRecording || isRecording || isTranscribing || recordingCountdown !== null) {
+      return;
+    }
+
+    setRecordingCountdown(3);
+    voice.emergencyAnnounce('Recording in 3, 2, 1');
+  }, [hasAudioPermission, hasAutoStartedRecording, isRecording, isTranscribing, recordingCountdown, voice]);
+
+  useEffect(() => {
+    if (recordingCountdown === null) {
+      return;
+    }
+
+    if (recordingCountdown <= 0) {
+      setHasAutoStartedRecording(true);
+      setRecordingCountdown(null);
+      startRecording();
+      return;
+    }
+
+    recordingCountdownTimerRef.current = setTimeout(() => {
+      setRecordingCountdown(recordingCountdown - 1);
+    }, 1000);
+
+    return () => {
+      if (recordingCountdownTimerRef.current) {
+        clearTimeout(recordingCountdownTimerRef.current);
+        recordingCountdownTimerRef.current = null;
+      }
+    };
+  }, [recordingCountdown, startRecording]);
 
   const stopRecording = async () => {
     if (!recordingRef.current) {
@@ -240,6 +265,25 @@ export default function SOSScreen() {
       recordingRef.current = null;
     }
   };
+
+  const handlePress = useCallback(async () => {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTapRef.current;
+    lastTapRef.current = now;
+
+    if (timeSinceLastTap < TAP_TIMEOUT) {
+      haptics.mediumImpact();
+      voice.quickFeedback(t('goingBack'));
+      router.back();
+      return;
+    }
+
+    if (isRecording) {
+      haptics.mediumImpact();
+      voice.quickFeedback(t('sending'));
+      await stopRecording();
+    }
+  }, [isRecording, router, haptics, voice, t, stopRecording]);
 
   const transcribeAndSend = async (audioUri: string) => {
     if (emergency.contacts.length === 0) {
@@ -306,9 +350,7 @@ export default function SOSScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <Pressable 
         style={styles.mainArea}
-        onPress={handleScreenTap}
-        onPressIn={startRecording}
-        onPressOut={stopRecording}
+        onPress={handlePress}
         disabled={isActivated || isTranscribing}
       >
         {/* Header */}
@@ -369,20 +411,24 @@ export default function SOSScreen() {
         </View>
 
         {/* Recording/Transcribing indicator */}
-        {(isRecording || isTranscribing) && (
+        {(recordingCountdown !== null || isRecording || isTranscribing) && (
           <View style={[styles.recordingIndicator, { backgroundColor: colors.emergency }]}>
             <FontAwesome name="microphone" size={20} color={colors.background} />
             <Text style={[styles.recordingText, { color: colors.background }]}>
-              {isRecording ? '🔴 Recording... Release to send' : 'Processing...'}
+              {recordingCountdown !== null
+                ? `Starting recording in ${recordingCountdown}...`
+                : isRecording
+                ? '🔴 Recording active. Tap once to send, double tap to go home.'
+                : 'Processing...'}
             </Text>
           </View>
         )}
 
         {/* Hint */}
-        {!isActivated && !isRecording && !isTranscribing && (
+        {recordingCountdown === null && !isActivated && !isRecording && !isTranscribing && (
           <View style={styles.hintContainer}>
-            <Text style={[styles.hintText, { color: colors.textMuted }]}>
-              Hold anywhere to record voice message
+            <Text style={[styles.hintText, { color: colors.textMuted }]}> 
+              Tap once to send after recording starts, double tap to go home
             </Text>
           </View>
         )}

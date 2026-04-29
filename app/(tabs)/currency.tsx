@@ -4,26 +4,26 @@
  * Tap anywhere to scan - full screen camera
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Pressable,
   StyleSheet,
-  View,
   Text,
   TouchableOpacity,
   useColorScheme,
-  ActivityIndicator,
-  Pressable,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useRouter } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import Colors, { FontSizes, Spacing } from '@/constants/Colors';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
-import { detectCurrency, CurrencyItem } from '@/services/geminiVision';
-import { useLanguage } from '@/contexts/LanguageContext';
+import { CurrencyItem, detectCurrency } from '@/services/geminiVision';
 
 const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || '';
 
@@ -50,7 +50,7 @@ export default function CurrencyScreen() {
   
   // Double tap to exit tracking
   const lastTapRef = useRef(0);
-  const TAP_TIMEOUT = 400;
+  const TAP_TIMEOUT = 1200;
 
   // Sync voice language
   useEffect(() => {
