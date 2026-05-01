@@ -5,20 +5,21 @@
  */
 
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useIsFocused } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Linking,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useColorScheme,
-  View,
+    Linking,
+    Modal,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useColorScheme,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -46,9 +47,8 @@ export default function SOSScreen() {
   const [isSending, setIsSending] = useState(false);
   const [hasAudioPermission, setHasAudioPermission] = useState(false);
   const [hasAutoStartedRecording, setHasAutoStartedRecording] = useState(false);
-  const [recordingCountdown, setRecordingCountdown] = useState<number | null>(null);
   const autoStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordingCountdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Contact modal
   const [showContactModal, setShowContactModal] = useState(false);
@@ -60,6 +60,8 @@ export default function SOSScreen() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordingLockRef = useRef(false); // Prevent race conditions
+  
+  const isFocused = useIsFocused();
   
   // Double tap to exit
   const lastTapRef = useRef(0);
@@ -204,41 +206,33 @@ export default function SOSScreen() {
   }, [isRecording, isTranscribing, t, voice, haptics]);
 
   useEffect(() => {
-    if (!hasAudioPermission || hasAutoStartedRecording || isRecording || isTranscribing || recordingCountdown !== null) {
+    if (!isFocused) {
       return;
     }
 
-    setRecordingCountdown(3);
-    voice.emergencyAnnounce('Recording in 3, 2, 1');
-  }, [hasAudioPermission, hasAutoStartedRecording, isRecording, isTranscribing, recordingCountdown, voice]);
+    if (!hasAudioPermission || hasAutoStartedRecording || isRecording || isTranscribing) {
+      return;
+    }
+
+    setHasAutoStartedRecording(true);
+    startRecording();
+  }, [hasAudioPermission, hasAutoStartedRecording, isRecording, isTranscribing, isFocused, startRecording]);
 
   useEffect(() => {
-    if (recordingCountdown === null) {
-      return;
+    if (isFocused) {
+      setHasAutoStartedRecording(false);
     }
-
-    if (recordingCountdown <= 0) {
-      setHasAutoStartedRecording(true);
-      setRecordingCountdown(null);
-      startRecording();
-      return;
-    }
-
-    recordingCountdownTimerRef.current = setTimeout(() => {
-      setRecordingCountdown(recordingCountdown - 1);
-    }, 1000);
-
-    return () => {
-      if (recordingCountdownTimerRef.current) {
-        clearTimeout(recordingCountdownTimerRef.current);
-        recordingCountdownTimerRef.current = null;
-      }
-    };
-  }, [recordingCountdown, startRecording]);
+  }, [isFocused]);
 
   const stopRecording = async () => {
+    if (pendingSendTimerRef.current) {
+      clearTimeout(pendingSendTimerRef.current);
+      pendingSendTimerRef.current = null;
+    }
+
     if (!recordingRef.current) {
       recordingLockRef.current = false;
+      setIsRecording(false);
       return;
     }
 
@@ -266,24 +260,76 @@ export default function SOSScreen() {
     }
   };
 
-  const handlePress = useCallback(async () => {
-    const now = Date.now();
-    const timeSinceLastTap = now - lastTapRef.current;
-    lastTapRef.current = now;
+  const stopRecordingWithoutSending = async () => {
+    if (pendingSendTimerRef.current) {
+      clearTimeout(pendingSendTimerRef.current);
+      pendingSendTimerRef.current = null;
+    }
 
-    if (timeSinceLastTap < TAP_TIMEOUT) {
-      haptics.mediumImpact();
-      voice.quickFeedback(t('goingBack'));
-      router.back();
+    if (!recordingRef.current) {
+      recordingLockRef.current = false;
+      setIsRecording(false);
       return;
     }
 
-    if (isRecording) {
-      haptics.mediumImpact();
-      voice.quickFeedback(t('sending'));
-      await stopRecording();
+    try {
+      setIsRecording(false);
+      recordingLockRef.current = false;
+      haptics.lightImpact();
+      await recordingRef.current.stopAndUnloadAsync();
+      recordingRef.current = null;
+    } catch {
+      recordingRef.current = null;
     }
-  }, [isRecording, router, haptics, voice, t, stopRecording]);
+  };
+
+  const handlePress = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTapRef.current;
+    const isDoubleTap = timeSinceLastTap < TAP_TIMEOUT;
+    lastTapRef.current = now;
+    const recordingActive = isRecording || !!recordingRef.current;
+
+    if (isDoubleTap) {
+      if (pendingSendTimerRef.current) {
+        clearTimeout(pendingSendTimerRef.current);
+        pendingSendTimerRef.current = null;
+      }
+
+      if (recordingActive) {
+        stopRecordingWithoutSending();
+      }
+
+      haptics.mediumImpact();
+      voice.quickFeedback(t('goingBack'));
+      router.replace('/');
+      return;
+    }
+
+    if (recordingActive) {
+      if (pendingSendTimerRef.current) {
+        clearTimeout(pendingSendTimerRef.current);
+      }
+
+      pendingSendTimerRef.current = setTimeout(async () => {
+        pendingSendTimerRef.current = null;
+        if (recordingRef.current) {
+          haptics.mediumImpact();
+          voice.quickFeedback(t('sending'));
+          await stopRecording();
+        }
+      }, TAP_TIMEOUT);
+    }
+  }, [isRecording, router, haptics, voice, t, stopRecordingWithoutSending]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingSendTimerRef.current) {
+        clearTimeout(pendingSendTimerRef.current);
+        pendingSendTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const transcribeAndSend = async (audioUri: string) => {
     if (emergency.contacts.length === 0) {
@@ -295,6 +341,10 @@ export default function SOSScreen() {
     voice.quickFeedback('Processing');
 
     try {
+      if (!GROQ_API_KEY) {
+        throw new Error('Missing Groq API key');
+      }
+
       // Create form data with audio file
       const formData = new FormData();
       formData.append('file', {
@@ -315,7 +365,11 @@ export default function SOSScreen() {
       });
 
       if (!response.ok) {
-        throw new Error(`Whisper API error: ${response.status}`);
+        const status = response.status;
+        if (status === 401 || status === 403) {
+          throw new Error('Whisper API unauthorized: invalid or missing Groq API key');
+        }
+        throw new Error(`Whisper API error: ${status}`);
       }
 
       const data = await response.json();
@@ -340,19 +394,25 @@ export default function SOSScreen() {
       }
     } catch (err) {
       console.error('Transcription error:', err);
-      voice.announce('Could not process voice message. Please try again.');
+      if (err instanceof Error && err.message.includes('Groq API key')) {
+        voice.announce('Whisper API key missing or invalid. Please add a valid Groq key.');
+      } else if (err instanceof Error && err.message.includes('unauthorized')) {
+        voice.announce('Whisper API unauthorized. Check your Groq API key.');
+      } else {
+        voice.announce('Could not process voice message. Please try again.');
+      }
     } finally {
       setIsTranscribing(false);
     }
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <Pressable 
-        style={styles.mainArea}
-        onPress={handlePress}
-        disabled={isActivated || isTranscribing}
-      >
+    <Pressable
+      style={[styles.container, { backgroundColor: colors.background }]}
+      onPress={handlePress}
+      disabled={isActivated || isTranscribing}
+    >
+      <SafeAreaView style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <Text
@@ -373,6 +433,7 @@ export default function SOSScreen() {
               style={[styles.sosButton, { backgroundColor: colors.sosBackground }]}
               onPress={handleSOSPress}
               activeOpacity={0.8}
+              disabled={isRecording || isActivated || isTranscribing}
               accessibilityLabel="Emergency SOS button"
               accessibilityHint="Double tap to start emergency countdown"
               accessibilityRole="button"
@@ -411,13 +472,11 @@ export default function SOSScreen() {
         </View>
 
         {/* Recording/Transcribing indicator */}
-        {(recordingCountdown !== null || isRecording || isTranscribing) && (
-          <View style={[styles.recordingIndicator, { backgroundColor: colors.emergency }]}>
+        {(isRecording || isTranscribing) && (
+          <View style={[styles.recordingIndicator, { backgroundColor: colors.emergency }]}> 
             <FontAwesome name="microphone" size={20} color={colors.background} />
-            <Text style={[styles.recordingText, { color: colors.background }]}>
-              {recordingCountdown !== null
-                ? `Starting recording in ${recordingCountdown}...`
-                : isRecording
+            <Text style={[styles.recordingText, { color: colors.background }]}> 
+              {isRecording
                 ? '🔴 Recording active. Tap once to send, double tap to go home.'
                 : 'Processing...'}
             </Text>
@@ -425,16 +484,15 @@ export default function SOSScreen() {
         )}
 
         {/* Hint */}
-        {recordingCountdown === null && !isActivated && !isRecording && !isTranscribing && (
+        {!isActivated && !isRecording && !isTranscribing && (
           <View style={styles.hintContainer}>
             <Text style={[styles.hintText, { color: colors.textMuted }]}> 
               Tap once to send after recording starts, double tap to go home
             </Text>
           </View>
         )}
-      </Pressable>
 
-      {/* Contact Management */}
+        {/* Contact Management */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.addContactButton, { backgroundColor: colors.surfaceElevated }]}
@@ -517,6 +575,7 @@ export default function SOSScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+    </Pressable>
   );
 }
 

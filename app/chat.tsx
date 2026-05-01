@@ -287,6 +287,10 @@ export default function ChatScreen() {
     voice.quickFeedback(t('processing'));
 
     try {
+      if (!GROQ_API_KEY) {
+        throw new Error('Missing Groq API key');
+      }
+
       // Create form data with audio file
       const formData = new FormData();
       formData.append('file', {
@@ -307,7 +311,11 @@ export default function ChatScreen() {
       });
 
       if (!response.ok) {
-        throw new Error(`Whisper API error: ${response.status}`);
+        const status = response.status;
+        if (status === 401 || status === 403) {
+          throw new Error('Whisper API unauthorized: invalid or missing Groq API key');
+        }
+        throw new Error(`Whisper API error: ${status}`);
       }
 
       const data = await response.json();
@@ -320,7 +328,13 @@ export default function ChatScreen() {
       }
     } catch (err) {
       console.error('Transcription error:', err);
-      voice.announce('Could not process speech. Please try again.');
+      if (err instanceof Error && err.message.includes('Groq API key')) {
+        voice.announce('Whisper API key missing or invalid. Please add a valid Groq key.');
+      } else if (err instanceof Error && err.message.includes('unauthorized')) {
+        voice.announce('Whisper API unauthorized. Check your Groq API key.');
+      } else {
+        voice.announce('Could not process speech. Please try again.');
+      }
     } finally {
       setIsProcessing(false);
     }
