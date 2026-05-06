@@ -414,7 +414,10 @@ export default function SOSScreen() {
     >
       <SafeAreaView style={styles.container}>
         {/* Header */}
-        <View style={styles.header}>
+        <Pressable 
+          style={styles.header}
+          onPress={!isActivated && !isTranscribing ? handleSOSPress : undefined}
+        >
           <Text
             style={[styles.headerText, { color: colors.text }]}
             accessibilityRole="header"
@@ -424,16 +427,19 @@ export default function SOSScreen() {
           <Text style={[styles.subHeaderText, { color: colors.textSecondary }]}>
             {emergency.contacts.length} emergency contacts
           </Text>
-        </View>
+        </Pressable>
 
         {/* Main SOS Button */}
-        <View style={styles.buttonContainer}>
+        <Pressable 
+          style={styles.buttonContainer}
+          onPress={!isActivated && !isTranscribing ? handleSOSPress : undefined}
+        >
           {!isActivated ? (
             <TouchableOpacity
               style={[styles.sosButton, { backgroundColor: colors.sosBackground }]}
               onPress={handleSOSPress}
               activeOpacity={0.8}
-              disabled={isRecording || isActivated || isTranscribing}
+              disabled={isActivated || isTranscribing}
               accessibilityLabel="Emergency SOS button"
               accessibilityHint="Double tap to start emergency countdown"
               accessibilityRole="button"
@@ -469,7 +475,7 @@ export default function SOSScreen() {
               )}
             </View>
           )}
-        </View>
+        </Pressable>
 
         {/* Recording/Transcribing indicator */}
         {(isRecording || isTranscribing) && (
